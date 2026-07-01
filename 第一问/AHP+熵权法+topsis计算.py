@@ -324,7 +324,7 @@ plt.ylabel('贴近度 C')
 plt.ylim(0, 1)
 
 for i, value in enumerate(plot_df['TOPSIS贴近度C']):
-    plt.text(i, value + 0.02, f'{value:.3f}', ha='center')
+    plt.text(i, value + 0.02, f'{value:.3f}', ha='center')#在指定坐标添加文本
 
 plt.tight_layout()
 plt.show()
