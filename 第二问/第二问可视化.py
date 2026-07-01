@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import math
+from tabulate import tabulate
 
 # =========================
 # 1. 中文显示设置
@@ -77,7 +78,15 @@ annual_df = pd.DataFrame({
 })
 
 print('===== 年度资源需求表 =====')
-print(annual_df.to_string(index=False))
+
+print(tabulate(
+    annual_df,
+    headers='keys',
+    tablefmt='grid',
+    showindex=False,
+    stralign='center',
+    numalign='center'
+))
 
 
 # =========================
@@ -156,10 +165,19 @@ for stage_name, (start, end) in stages.items():
         '阶段新增硬件成本_万元': add_cost
     })
 
+
 stage_df = pd.DataFrame(stage_results)
 
 print('\n===== 阶段配置优化表 =====')
-print(stage_df.to_string(index=False))
+print('\n===== 阶段配置优化表 =====')
+print(tabulate(
+    stage_df,
+    headers='keys',
+    tablefmt='grid',
+    showindex=False,
+    stralign='center',
+    numalign='center'
+))
 
 
 # =========================
