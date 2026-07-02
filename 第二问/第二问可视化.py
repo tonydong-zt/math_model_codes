@@ -23,8 +23,8 @@ node_price = 25       # 算力节点单价，万元/个
 
 budget = 2000         # 硬件预算上限，万元
 
-util_low = 0.75       # 利用率下限
-util_high = 0.90      # 利用率上限
+util_low = 0.80       # 利用率下限
+util_high = 0.93      # 利用率上限
 
 
 # =========================
@@ -59,8 +59,6 @@ hardware_need = np.ceil(hardware_demand).astype(int)
 node_demand = people / 100
 node_need = np.ceil(node_demand).astype(int)
 
-# 每年软性配套投入，单位：万元
-soft_cost_year = 300 + 0.12 * people
 
 
 # =========================
@@ -69,12 +67,12 @@ soft_cost_year = 300 + 0.12 * people
 annual_df = pd.DataFrame({
     '年份': years,
     '预测人数': people.round(2),
-    '办公工位总数': workstations,
+    '办公工位需求(未约束)': workstations,
     '科创硬件需求_理论值': hardware_demand.round(2),
     '科创硬件需求_取整': hardware_need,
     '算力节点需求_理论值': node_demand.round(2),
     '算力节点需求_取整': node_need,
-    '软性配套投入_万元': soft_cost_year.round(2)
+
 })
 
 print('===== 年度资源需求表 =====')
@@ -90,86 +88,153 @@ print(tabulate(
 
 
 # =========================
-# 6. 阶段划分与利用率约束优化
+# 6. 先按每一年计算推荐配置
 # =========================
-stages = {
-    '建设期': (0, 2),
-    '培育运营期': (3, 5),
-    '成熟发展期': (6, 10)
-}
 
-stage_results = []
+yearly_config_results = []
 
 previous_hardware = 0
 previous_node = 0
+previous_workstation = 0
 
-for stage_name, (start, end) in stages.items():
-    mask = (years >= start) & (years <= end)
+for i, year in enumerate(years):
+    # 当年理论需求
+    hardware_demand_year = hardware_demand[i]
+    node_demand_year = node_demand[i]
 
-    # 当前阶段最大需求
-    max_people = people[mask].max()
-
-    max_hardware_demand = hardware_demand[mask].max()
-    max_node_demand = node_demand[mask].max()
-
-    # 利用率要求：
+    # 利用率约束：
     # util = demand / capacity
-    # 0.75 <= demand / capacity <= 0.90
+    # util_low <= demand / capacity <= util_high
     #
     # 所以：
-    # demand / 0.90 <= capacity <= demand / 0.75
+    # demand / util_high <= capacity <= demand / util_low
 
-    hardware_lower = math.ceil(max_hardware_demand / util_high)
-    hardware_upper = math.floor(max_hardware_demand / util_low)
+    hardware_lower = math.ceil(hardware_demand_year / util_high)
+    hardware_upper = math.floor(hardware_demand_year / util_low)
 
-    node_lower = math.ceil(max_node_demand / util_high)
-    node_upper = math.floor(max_node_demand / util_low)
+    node_lower = math.ceil(node_demand_year / util_high)
+    node_upper = math.floor(node_demand_year / util_low)
 
-    # 成本最小，所以取满足约束的下限
-    hardware_capacity = hardware_lower
-    node_capacity = node_lower
+    # 成本最小，所以理论上取下限
+    # 同时考虑资源配置不能逐年减少，所以要和上一年的配置取最大值
+    hardware_capacity = max(hardware_lower, previous_hardware)
+    node_capacity = max(node_lower, previous_node)
 
-    # 计算利用率
-    hardware_util = max_hardware_demand / hardware_capacity
-    node_util = max_node_demand / node_capacity
+    # 计算实际利用率
+    hardware_util = hardware_demand_year / hardware_capacity
+    node_util = node_demand_year / node_capacity
 
-    # 阶段增量投入
+    # 当年新增配置
     add_hardware = hardware_capacity - previous_hardware
     add_node = node_capacity - previous_node
 
-    add_hardware = max(add_hardware, 0)
-    add_node = max(add_node, 0)
-
+    # 当年新增硬件成本
     add_cost = hardware_price * add_hardware + node_price * add_node
+
+    # 当年工位理论需求
+    workstation_demand_year = people[i]
+
+    # 工位配置范围
+    workstation_lower = math.ceil(workstation_demand_year / util_high)
+    workstation_upper = math.floor(workstation_demand_year / util_low)
+
+    # 工位不能逐年减少
+    workstation_capacity = max(workstation_lower, previous_workstation)
+
+    # 工位利用率
+    workstation_util = workstation_demand_year / workstation_capacity
+
+    # 当年新增工位
+    add_workstation = workstation_capacity - previous_workstation
+
+    soft_cost_year = 300 + 0.12 * workstation_capacity
+
+    yearly_config_results.append({
+        '年份': year,
+        '预测人数': round(people[i], 2),
+
+        '办公工位理论需求': round(workstation_demand_year, 2),
+        '办公工位配置范围': f'{workstation_lower}-{workstation_upper}',
+        '推荐办公工位数': workstation_capacity,
+        '办公工位利用率': round(workstation_util, 4),
+        '当年新增办公工位数': add_workstation,
+
+        '软性配套投入_万元': round(soft_cost_year, 2),
+
+        '科创硬件理论需求': round(hardware_demand_year, 2),
+        '科创硬件配置范围': f'{hardware_lower}-{hardware_upper}',
+        '推荐科创硬件套数': hardware_capacity,
+        '科创硬件利用率': round(hardware_util, 4),
+        '当年新增科创硬件套数': add_hardware,
+
+        '算力节点理论需求': round(node_demand_year, 2),
+        '算力节点配置范围': f'{node_lower}-{node_upper}',
+        '推荐算力节点规模': node_capacity,
+        '算力节点利用率': round(node_util, 4),
+        '当年新增算力节点': add_node,
+
+        '当年新增硬件成本_万元': add_cost
+    })
 
     previous_hardware = hardware_capacity
     previous_node = node_capacity
+    previous_workstation = workstation_capacity
+
+
+yearly_config_df = pd.DataFrame(yearly_config_results)
+
+print('\n===== 每一年推荐配置表 =====')
+print(tabulate(
+    yearly_config_df,
+    headers='keys',
+    tablefmt='grid',
+    showindex=False,
+    stralign='center',
+    numalign='center'
+))
+
+# =========================
+# 6.1 再由年度结果汇总到阶段结果
+# =========================
+
+stage_results = []
+stages = {'建设期': (0, 2),'培育运营期': (3, 5),'成熟发展期': (6, 10)}
+for stage_name, (start, end) in stages.items():
+    stage_data = yearly_config_df[
+        (yearly_config_df['年份'] >= start) &
+        (yearly_config_df['年份'] <= end)
+    ]
 
     stage_results.append({
         '阶段': stage_name,
         '年份范围': f'{start}-{end}',
-        '阶段最大人数': round(max_people, 2),
 
-        '科创硬件最大需求': round(max_hardware_demand, 2),
-        '科创硬件配置范围': f'{hardware_lower}-{hardware_upper}',
-        '推荐科创硬件套数': hardware_capacity,
-        '科创硬件利用率': round(hardware_util, 4),
+        '阶段最大人数': stage_data['预测人数'].max(),
 
-        '算力节点最大需求': round(max_node_demand, 2),
-        '算力节点配置范围': f'{node_lower}-{node_upper}',
-        '推荐算力节点规模': node_capacity,
-        '算力节点利用率': round(node_util, 4),
+        '推荐办公工位数': stage_data['推荐办公工位数'].max(),
+        '阶段新增办公工位数': stage_data['当年新增办公工位数'].sum(),
+        '办公工位最低利用率': stage_data['办公工位利用率'].min(),
+        '办公工位最高利用率': stage_data['办公工位利用率'].max(),
 
-        '阶段新增硬件套数': add_hardware,
-        '阶段新增算力节点': add_node,
-        '阶段新增硬件成本_万元': add_cost
+
+        '推荐科创硬件套数': stage_data['推荐科创硬件套数'].max(),
+        '阶段新增硬件套数': stage_data['当年新增科创硬件套数'].sum(),
+        '科创硬件最低利用率': stage_data['科创硬件利用率'].min(),
+        '科创硬件最高利用率': stage_data['科创硬件利用率'].max(),
+
+        '推荐算力节点规模': stage_data['推荐算力节点规模'].max(),
+        '阶段新增算力节点': stage_data['当年新增算力节点'].sum(),
+        '算力节点最低利用率': stage_data['算力节点利用率'].min(),
+        '算力节点最高利用率': stage_data['算力节点利用率'].max(),
+
+        '阶段新增硬件成本_万元': stage_data['当年新增硬件成本_万元'].sum(),
+        '阶段软性配套投入_万元': stage_data['软性配套投入_万元'].sum(),
     })
 
 
 stage_df = pd.DataFrame(stage_results)
 
-print('\n===== 阶段配置优化表 =====')
-print('\n===== 阶段配置优化表 =====')
+print('\n===== 由年度配置汇总得到的阶段配置表 =====')
 print(tabulate(
     stage_df,
     headers='keys',
@@ -180,16 +245,22 @@ print(tabulate(
 ))
 
 
+
 # =========================
 # 7. 成本计算
 # =========================
-final_hardware = stage_df.iloc[-1]['推荐科创硬件套数']
-final_node = stage_df.iloc[-1]['推荐算力节点规模']
 
-hard_cost_total = hardware_price * final_hardware + node_price * final_node
+final_workstation = yearly_config_df.iloc[-1]['推荐办公工位数']
+final_hardware = yearly_config_df.iloc[-1]['推荐科创硬件套数']
+final_node = yearly_config_df.iloc[-1]['推荐算力节点规模']
+
+hard_cost_total = yearly_config_df['当年新增硬件成本_万元'].sum()
 
 # 软性配套投入按第 1 年到第 10 年求和
-soft_cost_total = annual_df[annual_df['年份'] >= 1]['软性配套投入_万元'].sum()
+# 注意：这里已经改成按“受利用率约束后的推荐办公工位数”计算
+soft_cost_total = yearly_config_df[
+    yearly_config_df['年份'] >= 1
+]['软性配套投入_万元'].sum()
 
 total_cost = hard_cost_total + soft_cost_total
 
@@ -197,6 +268,7 @@ hard_ratio = hard_cost_total / total_cost
 soft_ratio = soft_cost_total / total_cost
 
 print('\n===== 成本结果 =====')
+print(f'最终推荐办公工位数：{final_workstation} 个')
 print(f'最终推荐科创硬件套数：{final_hardware} 套')
 print(f'最终推荐算力节点规模：{final_node} 个')
 print(f'硬件总投入：{hard_cost_total:.2f} 万元')
@@ -209,7 +281,6 @@ if hard_cost_total <= budget:
     print(f'硬件预算约束满足：{hard_cost_total:.2f} <= {budget}')
 else:
     print(f'注意：硬件预算约束不满足，超出 {hard_cost_total - budget:.2f} 万元')
-
 
 # =========================
 # 8. 可视化
