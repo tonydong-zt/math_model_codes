@@ -180,7 +180,7 @@ print(entropy_df.round(4))
 # =========================
 
 # alpha 表示 AHP 主观权重占比
-# 你的 PDF 里可以用 0.6 和 0.4 组合
+
 alpha = 0.6
 
 w = alpha * w_AHP+ (1 - alpha) * w_entropy
